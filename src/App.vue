@@ -5,7 +5,7 @@ import HomeView from './components/HomeView.vue'
 import QuizView from './components/QuizView.vue'
 import ResultView from './components/ResultView.vue'
 import WrongBookView from './components/WrongBookView.vue'
-import { useProgress } from './composables/useProgress.js'
+import { useProgress, keyOf } from './composables/useProgress.js'
 import { shuffle } from './utils/kana.js'
 
 const MODE_KEY = 'jp-vocab-quest/mode'
@@ -28,44 +28,75 @@ watch(mode, (v) => {
 const withLesson = (l) => l.words.map((w) => ({ ...w, lessonId: l.id }))
 const allWords = lessons.flatMap(withLesson)
 
-function startLesson(id) {
-  const l = lessons.find((x) => x.id === id)
-  if (!l) return
-  session.value = {
-    lessonId: id,
-    title: `第${id}课 ${l.title}`,
-    words: withLesson(l),
-    mode: mode.value,
+/** 该词是否已经答对过(答错会被重新标记为未掌握) */
+const isMastered = (w) => !!progress.state.mastered[keyOf(w.lessonId ?? 0, w.jp)]
+
+/**
+ * 生成本轮答题会话
+ * 规则: 已经答对的词不再进入新一轮; 如果该范围内已全部答对, 则退回复习全部
+ * @param {{lessonId:number, baseTitle:string, source:Array, limit?:number, filterMastered?:boolean, mode:string}} opts
+ */
+function buildSession({ lessonId, baseTitle, source, limit = Infinity, filterMastered = true, mode: m }) {
+  const pending = filterMastered ? source.filter((w) => !isMastered(w)) : source
+  const reviewing = filterMastered && !pending.length && source.length > 0
+  const pool = pending.length ? pending : source
+  return {
+    lessonId,
+    baseTitle,
+    source,
+    limit,
+    filterMastered,
+    mode: m,
+    words: shuffle(pool).slice(0, limit),
+    title: reviewing ? `${baseTitle}（复习·已全部答对）` : baseTitle,
   }
+}
+
+function startSession(opts) {
+  const s = buildSession(opts)
+  if (!s.words.length) return
+  session.value = s
   view.value = 'quiz'
 }
 
-function startRandom() {
-  session.value = {
-    lessonId: 0,
-    title: '随机挑战',
-    words: shuffle(allWords).slice(0, 20),
+function startLesson(id) {
+  const l = lessons.find((x) => x.id === id)
+  if (!l) return
+  startSession({
+    lessonId: id,
+    baseTitle: `第${id}课 ${l.title}`,
+    source: withLesson(l),
     mode: mode.value,
-  }
-  view.value = 'quiz'
+  })
+}
+
+function startRandom() {
+  startSession({
+    lessonId: 0,
+    baseTitle: '随机挑战',
+    source: allWords,
+    limit: 20,
+    mode: mode.value,
+  })
 }
 
 function startWrong() {
   const list = progress.wrongList.value
   if (!list.length) return
-  session.value = {
+  startSession({
     lessonId: 0,
-    title: `错题重练（${list.length}）`,
-    words: list.map((w) => ({
+    baseTitle: `错题重练（${list.length}）`,
+    source: list.map((w) => ({
       jp: w.jp,
       kana: w.kana,
       cn: w.cn,
       type: w.type,
       lessonId: w.lessonId,
     })),
+    // 错题本就是专门练没记住的词, 不按"已掌握"过滤
+    filterMastered: false,
     mode: mode.value,
-  }
-  view.value = 'quiz'
+  })
 }
 
 function onFinish(res) {
@@ -74,9 +105,9 @@ function onFinish(res) {
 }
 
 function retry() {
-  const s = session.value
-  if (!s) return startRandom()
-  session.value = { ...s, words: shuffle(s.words) }
+  if (!session.value) return startRandom()
+  // 重来一遍时重新过滤: 刚答对的词不再出现
+  session.value = buildSession(session.value)
   view.value = 'quiz'
 }
 
@@ -136,6 +167,6 @@ function resetAll() {
 
   <p class="footer-note">
     词库来自《软件工程师日语词汇表》，共 {{ lessons.length }} 课。进度保存在本机浏览器中。<br />
-    汉字词输入平假名，外来语输入片假名 · 手机可用日语输入法直接作答
+    汉字词输入平假名，外来语输入片假名（写平假名也算对）· 已答对的词下次不再出现 · 手机可用日语输入法直接作答
   </p>
 </template>

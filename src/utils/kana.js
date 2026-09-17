@@ -28,16 +28,24 @@ export function normalize(s = '') {
 
 /**
  * 判定用户输入
- * @returns {{status:'empty'|'correct'|'kanaType'|'wrong', need?:string}}
+ * @param {string} input 用户输入
+ * @param {string} answer 正确答案(假名)
+ * @param {{allowHiraganaForKatakana?: boolean}} [opts]
+ *   allowHiraganaForKatakana: 片假名单词是否接受平假名作答(默认允许)
+ * @returns {{status:'empty'|'correct'|'kanaType'|'wrong', need?:string, kanaAlt?:boolean}}}
  */
-export function judge(input, answer) {
+export function judge(input, answer, opts = {}) {
+  const { allowHiraganaForKatakana = true } = opts
   const i = normalize(input)
   const a = normalize(answer)
   if (!i) return { status: 'empty' }
   if (i === a) return { status: 'correct' }
+  const isKata = hasKatakana(answer)
   // 只是平假名 / 片假名用错了
   if (toHiragana(i) === toHiragana(a)) {
-    return { status: 'kanaType', need: hasKatakana(answer) ? '片假名' : '平假名' }
+    // 片假名单词: 允许用平假名作答(记为 kanaAlt, 便于提示正确写法)
+    if (isKata && allowHiraganaForKatakana) return { status: 'correct', kanaAlt: true }
+    return { status: 'kanaType', need: isKata ? '片假名' : '平假名' }
   }
   return { status: 'wrong' }
 }

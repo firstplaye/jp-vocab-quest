@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { judge, hintFor, shuffle, hasKanji, hasKatakana } from '../utils/kana.js'
+import { judge, hintFor, shuffle } from '../utils/kana.js'
 import { useProgress } from '../composables/useProgress.js'
 
 const props = defineProps({
@@ -17,7 +17,14 @@ const emit = defineEmits(['finish', 'exit'])
 
 const progress = useProgress()
 
-const queue = ref(shuffle(props.words).slice(0, props.limit))
+/** 同一个词只保留一次, 避免答对过的词重复出现 */
+const uniqByJp = (arr) => {
+  const m = new Map()
+  for (const w of arr) if (!m.has(w.jp)) m.set(w.jp, w)
+  return [...m.values()]
+}
+
+const queue = ref(shuffle(uniqByJp(props.words)).slice(0, props.limit))
 const index = ref(0)
 const input = ref('')
 const feedback = ref(null)
@@ -35,12 +42,6 @@ const total = computed(() => queue.value.length)
 const doneCount = computed(() => index.value)
 const correctFirst = computed(() => firstResults.value.filter((r) => r.ok).length)
 
-const typeHint = computed(() => {
-  const t = current.value?.type
-  if (t === 'katakana') return '外来语 · 请输入片假名'
-  return '请输入平假名'
-})
-
 const options = computed(() => {
   const w = current.value
   if (!w) return []
@@ -54,12 +55,6 @@ const options = computed(() => {
   // 优先用同类型的词做干扰项, 不够再从全部词里取
   const candidates = sameType.length >= 3 ? sameType : all
   return shuffle([w, ...shuffle(candidates).slice(0, 3)])
-})
-
-const promptChars = computed(() => {
-  const w = current.value
-  if (!w) return ''
-  return hasKanji(w.jp) ? w.jp : ''
 })
 
 function focusInput() {
@@ -119,7 +114,7 @@ function submit() {
   if (r.status === 'correct') {
     streak.value += 1
     bestStreak.value = Math.max(bestStreak.value, streak.value)
-    feedback.value = { status: 'correct' }
+    feedback.value = { status: 'correct', kanaAlt: !!r.kanaAlt }
     record(true)
     setTimeout(() => {
       if (feedback.value?.status === 'correct') next()
@@ -213,9 +208,7 @@ const optionClass = (opt) => {
 
       <div class="jp quiz-cn">{{ current.cn }}</div>
       <div class="jp quiz-hintword">
-        <template v-if="mode === 'input'">
-          {{ hinted ? hintFor(current.kana, 1) : promptChars || '　' }}
-        </template>
+        <template v-if="mode === 'input' && hinted">{{ hintFor(current.kana, 1) }}</template>
       </div>
 
       <template v-if="mode === 'input'">
@@ -229,7 +222,7 @@ const optionClass = (opt) => {
           autocorrect="off"
           autocapitalize="off"
           spellcheck="false"
-          :placeholder="'在此输入' + (current.type === 'katakana' ? '片假名' : '假名')"
+          :placeholder="current.type === 'katakana' ? '在此输入片假名（平假名也算对）' : '在此输入平假名'"
           :class="{
             ok: feedback?.status === 'correct',
             bad: feedback?.status === 'wrong',
@@ -254,7 +247,8 @@ const optionClass = (opt) => {
       <div v-if="feedback" class="feedback" :class="feedback.status === 'wrong' ? 'bad' : feedback.status === 'correct' ? 'ok' : ''">
         <template v-if="feedback.status === 'correct'">
           ✅ 正确！<span class="jp">{{ current.jp }}</span>
-          <span class="jp-mini">（{{ current.kana }}）</span>
+          <span v-if="current.kana !== current.jp" class="jp-mini">（{{ current.kana }}）</span>
+          <div v-if="feedback.kanaAlt" class="jp-mini">外来语通常写作片假名，平假名也接受</div>
         </template>
         <template v-else-if="feedback.status === 'kanaType'">
           ⚠️ 假名种类不对，本题需要输入<strong>{{ feedback.need }}</strong>。你写的是：
@@ -262,7 +256,9 @@ const optionClass = (opt) => {
         </template>
         <template v-else>
           ✗ 正确答案：<span class="answer jp">{{ feedback.answer }}</span>
-          <div class="jp-mini jp">词形：{{ current.jp }}　释义：{{ current.cn }}</div>
+          <div class="jp-mini jp">
+            <template v-if="current.jp !== current.kana">词形：{{ current.jp }}　</template>释义：{{ current.cn }}
+          </div>
         </template>
       </div>
 
