@@ -1,6 +1,7 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { judge, hintFor, shuffle } from '../utils/kana.js'
+import { convert, finalize } from '../utils/romaji.js'
 import { useProgress } from '../composables/useProgress.js'
 
 const props = defineProps({
@@ -26,13 +27,27 @@ const uniqByJp = (arr) => {
 
 const queue = ref(shuffle(uniqByJp(props.words)).slice(0, props.limit))
 const index = ref(0)
-const input = ref('')
+/**
+ * 内置输入法的原始输入(已经确定的假名 + 末尾还没打完的罗马字)。
+ * 显示 / 提交时都由 romaji.js 现算, 所以退格、中段修改都不会算错。
+ */
+const raw = ref('')
+/** 系统输入法正在组字(此时不插手, 等它提交后再过滤) */
+const composing = ref(false)
 const feedback = ref(null)
 const streak = ref(0)
 const bestStreak = ref(0)
 const firstResults = ref([])
 const hinted = ref(false)
 const inputEl = ref(null)
+
+/**
+ * 触屏设备需要软键盘, 只能用真实 <input>;
+ * 非触屏则改用不可编辑的展示区接管键盘事件 —— 系统输入法(IME)对非可编辑元素
+ * 不生效, 因此打字时绝不会弹出候选 / 联想窗, 也就不需要"禁用"系统输入法。
+ */
+const useNativeInput =
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true
 
 const seen = new Set()
 const retried = new Set()
@@ -41,6 +56,25 @@ const current = computed(() => queue.value[index.value] ?? null)
 const total = computed(() => queue.value.length)
 const doneCount = computed(() => index.value)
 const correctFirst = computed(() => firstResults.value.filter((r) => r.ok).length)
+
+/** 这道题该输出哪种假名: 片假名单词(如 コピー)就用片假名, 其余用平假名 */
+const kanaScript = computed(() => {
+  const kana = current.value?.kana ?? ''
+  return /[\u30A1-\u30FA]/.test(kana) && !/[\u3041-\u3096]/.test(kana) ? 'katakana' : 'hiragana'
+})
+
+/** 把原始输入过一遍内置输入法: { kana: 已确定的假名, pending: 没打完的罗马字 } */
+const parts = computed(() => convert(raw.value, kanaScript.value))
+
+/** 显示内容 = 已确定的假名 + 没打完的罗马字 */
+const fieldText = computed(() => parts.value.kana + parts.value.pending)
+
+/** 提交给 judge() 的答案(末尾没打完的罗马字会补完) */
+const answerText = computed(() => finalize(raw.value, kanaScript.value))
+
+const placeholder = computed(() =>
+  kanaScript.value === 'katakana' ? '直接打罗马字，例：kopi- → コピー' : '直接打罗马字，例：ka → か'
+)
 
 const options = computed(() => {
   const w = current.value
@@ -61,11 +95,91 @@ function focusInput() {
   nextTick(() => inputEl.value?.focus())
 }
 
-onMounted(focusInput)
+onMounted(() => {
+  focusInput()
+  // 非触屏: 键盘事件挂在 window 上, 这样点过"提示/跳过"按钮之后继续打字也不会丢键
+  window.addEventListener('keydown', onWindowKeydown)
+})
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onWindowKeydown))
+
+/**
+ * 键盘接管(非触屏路径)。输入框是不可编辑元素, 系统输入法不会介入,
+ * 所以这里拿到的就是原始按键, 不会出现 IME 的候选/联想窗。
+ */
+function onWindowKeydown(e) {
+  if (useNativeInput || props.mode !== 'input' || !current.value) return
+  if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
+  const el = e.target
+  if (el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable) return
+
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    submit()
+    return
+  }
+  if (e.key === 'Backspace') {
+    e.preventDefault()
+    raw.value = raw.value.slice(0, -1)
+    return
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    raw.value = ''
+    return
+  }
+  if (e.key === ' ') {
+    if (el?.tagName === 'BUTTON') return // 空格留给按钮(键盘可访问性)
+    e.preventDefault() // 空格会被转换器丢掉, 顺手阻止页面滚动
+    return
+  }
+  if ([...e.key].length === 1) {
+    // 单个可打印字符: 交给内置输入法, 认不出的字符(汉字等)会被自动丢掉
+    e.preventDefault()
+    raw.value += e.key
+  }
+}
+
+/** 粘贴(非触屏路径): 只接受假名和罗马字, 其余字符照样过滤掉 */
+function onPaste(e) {
+  const text = e.clipboardData?.getData('text') ?? ''
+  const { kana, pending } = convert(raw.value + text, kanaScript.value)
+  raw.value = kana + pending
+}
+
+/**
+ * 触屏路径: 输入框是真实 <input>, 每次输入都从它的完整内容重算(幂等),
+ * 所以退格、粘贴、光标跳转都能正确处理。
+ */
+function applyRaw(el) {
+  const { kana, pending } = convert(el.value, kanaScript.value)
+  const text = kana + pending
+  raw.value = text
+  if (el.value !== text) {
+    el.value = text
+    el.setSelectionRange?.(text.length, text.length)
+  }
+}
+
+function onInput(e) {
+  if (composing.value) return // 系统输入法正在组字, 等它提交后再处理
+  applyRaw(e.target)
+}
+
+function onCompositionEnd(e) {
+  composing.value = false
+  applyRaw(e.target)
+}
+
+function onEnter(e) {
+  if (composing.value) return // 回车交给输入法确认候选, 不算提交
+  e.preventDefault()
+  submit()
+}
 
 function next() {
   feedback.value = null
-  input.value = ''
+  raw.value = ''
   hinted.value = false
   if (index.value + 1 >= queue.value.length) {
     finish()
@@ -102,12 +216,13 @@ function submit() {
   }
   const w = current.value
   if (!w) return
-  const r = judge(input.value, w.kana)
+  const typed = answerText.value
+  const r = judge(typed, w.kana)
 
   if (r.status === 'empty') return
 
   if (r.status === 'kanaType') {
-    feedback.value = { status: 'kanaType', need: r.need }
+    feedback.value = { status: 'kanaType', need: r.need, typed }
     return
   }
 
@@ -212,9 +327,35 @@ const optionClass = (opt) => {
       </div>
 
       <template v-if="mode === 'input'">
-        <input
+        <!-- 非触屏: 不可编辑的展示区 + window 键盘事件。
+             系统输入法对非可编辑元素不生效, 所以这里打字不会弹出 IME 候选/联想窗 -->
+        <div
+          v-if="!useNativeInput"
           ref="inputEl"
-          v-model="input"
+          class="answer-input answer-display jp"
+          :class="{
+            ok: feedback?.status === 'correct',
+            bad: feedback?.status === 'wrong',
+          }"
+          tabindex="0"
+          role="textbox"
+          aria-readonly="true"
+          :aria-label="placeholder"
+          @paste.prevent="onPaste"
+        >
+          <template v-if="fieldText">
+            <span>{{ parts.kana }}</span>
+            <span class="pending">{{ parts.pending }}</span>
+          </template>
+          <span v-else class="answer-ph">{{ placeholder }}</span>
+          <span class="caret" aria-hidden="true" />
+        </div>
+
+        <!-- 触屏: 需要软键盘, 用真实 <input>, 非假名字符同样会被吃掉 -->
+        <input
+          v-else
+          ref="inputEl"
+          :value="fieldText"
           class="answer-input jp"
           lang="ja"
           type="text"
@@ -222,13 +363,18 @@ const optionClass = (opt) => {
           autocorrect="off"
           autocapitalize="off"
           spellcheck="false"
-          :placeholder="current.type === 'katakana' ? '在此输入片假名（平假名也算对）' : '在此输入平假名'"
+          enterkeyhint="done"
+          :placeholder="placeholder"
           :class="{
             ok: feedback?.status === 'correct',
             bad: feedback?.status === 'wrong',
           }"
-          @keydown.enter.prevent="submit"
+          @input="onInput"
+          @compositionstart="composing = true"
+          @compositionend="onCompositionEnd"
+          @keydown.enter="onEnter"
         />
+        <p class="ime-note">直接打罗马字，不用切换输入法；非假名字符会被忽略</p>
       </template>
 
       <div v-else class="choice-grid">
@@ -252,7 +398,7 @@ const optionClass = (opt) => {
         </template>
         <template v-else-if="feedback.status === 'kanaType'">
           ⚠️ 假名种类不对，本题需要输入<strong>{{ feedback.need }}</strong>。你写的是：
-          <span class="jp">{{ input }}</span>
+          <span class="jp">{{ feedback.typed }}</span>
         </template>
         <template v-else>
           ✗ 正确答案：<span class="answer jp">{{ feedback.answer }}</span>
