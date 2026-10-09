@@ -280,10 +280,12 @@ for (const f of ADD_WORDS) {
 }
 
 /**
- * 6d. 第31课: 删除「英文：日语」条目
+ * 6d. 第31课: 剔除「英文：日语」条目
  *   原文档补充词汇里混进了 Java、Spring boot 这类「英文→日语」对照
- *   (Java：ジャバ / Springboot：スプリングブート …), 它们不是日语词汇, 全部剔除;
- *   只保留释义含汉字的「中文→日语」条目(放在 6c 补丁之后, 免得误删补全前的空释义)。
+ *   (Java：ジャバ / Springboot：スプリングブート …), 它们不是日语词汇;
+ *   scripts/source/vocab-raw.txt 里这些行已经删掉了, 这条规则留着当保险 ——
+ *   万一以后重新从 Word 导出又把它们带进来, 解析时也不会漏出去。
+ *   注意要放在 6c 补丁之后, 免得连补全前的空释义(既存 等)一起误删。
  */
 const l31 = result.find((x) => x.id === 31)
 if (l31) l31.words = l31.words.filter((w) => KANJI.test(w.cn))
