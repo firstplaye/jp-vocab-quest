@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { judge, hintFor, shuffle } from '../utils/kana.js'
-import { convert, finalize } from '../utils/romaji.js'
+import { convert, finalize, previewPending } from '../utils/romaji.js'
 import { useProgress } from '../composables/useProgress.js'
 
 const props = defineProps({
@@ -66,8 +66,18 @@ const kanaScript = computed(() => {
 /** 把原始输入过一遍内置输入法: { kana: 已确定的假名, pending: 没打完的罗马字 } */
 const parts = computed(() => convert(raw.value, kanaScript.value))
 
-/** 显示内容 = 已确定的假名 + 没打完的罗马字 */
-const fieldText = computed(() => parts.value.kana + parts.value.pending)
+/** 末尾没打完的罗马字(显示用): 末尾只剩「nn」时直接显示成「ん」, 和系统输入法一致 */
+const pendingText = computed(() => previewPending(parts.value.pending, kanaScript.value))
+
+/** 展示区显示内容 = 已确定的假名 + 没打完的罗马字(带 nn → ん 预览) */
+const fieldText = computed(() => parts.value.kana + pendingText.value)
+
+/**
+ * 写回 <input> 的文本 = 原始罗马字(不带预览)。
+ * 触屏路径的输入框内容就是输入状态, 把预览出来的「ん」写进去会让后续的
+ * 「i」接不回去, 「nna」会变成「んあ」而不是「んな」。
+ */
+const rawText = computed(() => parts.value.kana + parts.value.pending)
 
 /** 提交给 judge() 的答案(末尾没打完的罗马字会补完) */
 const answerText = computed(() => finalize(raw.value, kanaScript.value))
@@ -345,7 +355,7 @@ const optionClass = (opt) => {
         >
           <template v-if="fieldText">
             <span>{{ parts.kana }}</span>
-            <span class="pending">{{ parts.pending }}</span>
+            <span class="pending">{{ pendingText }}</span>
           </template>
           <span v-else class="answer-ph">{{ placeholder }}</span>
           <span class="caret" aria-hidden="true" />
@@ -355,7 +365,7 @@ const optionClass = (opt) => {
         <input
           v-else
           ref="inputEl"
-          :value="fieldText"
+          :value="rawText"
           class="answer-input jp"
           lang="ja"
           type="text"

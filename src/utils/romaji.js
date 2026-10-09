@@ -91,6 +91,13 @@ export function convert(raw, script = 'hiragana') {
   /** 尽可能把 buf 开头的罗马字转成假名, 转不动的留在 buf 里等下一个键 */
   const match = () => {
     while (buf) {
+      // 隔音撇号: 只有紧跟「n」时才有意义(在下面的拨音分支里消耗掉),
+      // 剩下的(例如「nn'」转换后残留的)没有意义, 直接忽略
+      if (buf[0] === "'") {
+        buf = buf.slice(1)
+        continue
+      }
+
       const second = buf[1]
 
       // 促音: 「kk」→ っ, 剩下的 "k" 继续等
@@ -161,4 +168,20 @@ export function finalize(raw, script = 'hiragana') {
   const { kana, pending } = convert(raw, script)
   if (!pending.endsWith('n')) return kana
   return kana + (script === 'katakana' ? 'ン' : 'ん')
+}
+
+/**
+ * 显示用: 末尾还没打完的罗马字里, 只有「nn」是能确定的 —— 它就是「ん」,
+ * 只是还得留着「nna → んな」的余地, 所以不能真的转换掉。
+ * 这里让它在屏幕上先显示成「ん」(跟系统输入法一样), 继续按键时再重新判定。
+ *   nn  → ん      (再打 i 就变成 んに)
+ *   n   → n       (可能是 na / ni …, 只能原样显示)
+ *
+ * 注意: 只用于「显示」。千万不要把结果写回输入状态, 否则「nna」会变成「んあ」。
+ * @param {string} pending convert() 返回的未完成罗马字
+ * @param {'hiragana'|'katakana'} [script] 显示哪种假名
+ */
+export function previewPending(pending, script = 'hiragana') {
+  if (pending === 'nn') return script === 'katakana' ? 'ン' : 'ん'
+  return pending
 }
