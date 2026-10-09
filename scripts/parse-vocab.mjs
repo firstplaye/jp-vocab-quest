@@ -235,6 +235,8 @@ const PATCH_WORDS = [
   { lesson: 31, jp: '関数', set: { kana: 'かんすう', type: 'kanji' } },
   { lesson: 31, jp: '定数', set: { kana: 'ていすう', type: 'kanji' } },
   { lesson: 31, jp: '変数', set: { kana: 'へんすう', type: 'kanji' } },
+  // 原文档没写读音, 解析出来会退化成词形本身(データ型), 那样答题区根本打不出来
+  { lesson: 31, jp: 'データ型', set: { kana: 'データがた', type: 'kanji' } },
   { lesson: 31, jp: '単体テスト', set: { kana: 'たんたいテスト', type: 'kanji' } },
   { lesson: 31, jp: '直近プロジェクト', set: { kana: 'ちょっきんプロジェクト', type: 'kanji' } },
   { lesson: 31, jp: '戻り値', set: { kana: 'もどりち', type: 'kanji' } },
@@ -299,6 +301,8 @@ for (const l of result) {
   for (const w of l.words) {
     if (!w.cn) report.push(`[L${l.id}] 无中文: ${w.jp} (${w.kana})`)
     if (w.type === 'raw') report.push(`[L${l.id}] 无假名: ${w.jp} / ${w.cn}`)
+    // 读音退化成词形(没给读音)时会混进汉字, 这种题答题区打不出来
+    if (KANJI.test(w.kana)) report.push(`[L${l.id}] 读音含汉字: ${w.jp} → ${w.kana} / ${w.cn}`)
     if (/[A-Za-z]/.test(w.jp)) report.push(`[L${l.id}] 词形含英文: ${w.jp} (${w.kana}) / ${w.cn}`)
   }
 }

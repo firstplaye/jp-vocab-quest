@@ -1,4 +1,5 @@
 import { computed, reactive, watch } from 'vue'
+import lessonsData from '../data/lessons.json'
 
 const STORAGE_KEY = 'jp-vocab-quest/v1'
 
@@ -19,25 +20,47 @@ function load() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return emptyState()
-    return { ...emptyState(), ...JSON.parse(raw) }
+    const s = { ...emptyState(), ...JSON.parse(raw) }
+    syncWrong(s.wrong)
+    return s
   } catch {
     return emptyState()
   }
 }
 
+/**
+ * 错题本里存的是词条快照(读音/释义/类型), 词库修正过之后, 旧快照里的错误
+ * 会一直留着(比如 データ型 的读音曾被存成「データ型」, 练习时照样答不对),
+ * 所以加载时按当前词库把快照刷新一遍。词库里已经没有的词条保持原样。
+ */
+function syncWrong(wrong = {}) {
+  const byKey = new Map()
+  // 这里不能用下面的 keyOf(): 它要等 state 初始化完才存在, 而 syncWrong() 是 state 初始化时调的
+  for (const l of lessonsData.lessons) for (const w of l.words) byKey.set(`${l.id}::${w.jp}`, w)
+  for (const [k, v] of Object.entries(wrong)) {
+    const cur = byKey.get(k)
+    if (!cur) continue
+    v.kana = cur.kana
+    v.cn = cur.cn
+    v.type = cur.type
+  }
+}
+
+function persist(s) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+  } catch {
+    /* 隐私模式下忽略 */
+  }
+}
+
 const state = reactive(load())
 
-watch(
-  state,
-  (s) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-    } catch {
-      /* 隐私模式下忽略 */
-    }
-  },
-  { deep: true },
-)
+watch(state, persist, { deep: true })
+
+// load() 里刷新错题本快照发生在 watch 建立之前, 不会触发上面的回写 ——
+// 这里补一次, 免得用户只是打开页面(还没答题)时, 本地存的还是旧快照
+persist(state)
 
 export const keyOf = (lessonId, jp) => `${lessonId}::${jp}`
 
