@@ -185,3 +185,20 @@ export function previewPending(pending, script = 'hiragana') {
   if (pending === 'nn') return script === 'katakana' ? 'ン' : 'ん'
   return pending
 }
+
+/**
+ * 触屏路径用: <input> 里现在是 `value`, 上一次写进去的文本是 `view`(可能带着 nn→ん 的预览)。
+ * 用户只是在末尾接着打字时, 预览出来的那个「ん」还得退回成「nn」——
+ * 直接拿输入框内容重算的话, 「nn」之后再打 i 会变成「んい」而不是「んに」。
+ * 退格 / 光标跳转 / 整段替换分不出是哪种情况, 就按输入框里现有的假名重算。
+ * @param {string} raw 当前状态(已确定假名 + 未打完的罗马字)
+ * @param {string} value <input> 现在的完整内容
+ * @param {string} view 上一次渲染进 <input> 的文本
+ * @param {'hiragana'|'katakana'} [script]
+ * @returns {string} 新的状态
+ */
+export function mergeInputValue(raw, value, view, script = 'hiragana') {
+  if (view && value.startsWith(view)) return raw + value.slice(view.length)
+  const { kana, pending } = convert(value, script)
+  return kana + pending
+}

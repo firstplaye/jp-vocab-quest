@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { judge, hintFor, shuffle } from '../utils/kana.js'
-import { convert, finalize, previewPending } from '../utils/romaji.js'
+import { convert, finalize, mergeInputValue, previewPending } from '../utils/romaji.js'
 import { useProgress } from '../composables/useProgress.js'
 
 const props = defineProps({
@@ -71,13 +71,6 @@ const pendingText = computed(() => previewPending(parts.value.pending, kanaScrip
 
 /** 展示区显示内容 = 已确定的假名 + 没打完的罗马字(带 nn → ん 预览) */
 const fieldText = computed(() => parts.value.kana + pendingText.value)
-
-/**
- * 写回 <input> 的文本 = 原始罗马字(不带预览)。
- * 触屏路径的输入框内容就是输入状态, 把预览出来的「ん」写进去会让后续的
- * 「i」接不回去, 「nna」会变成「んあ」而不是「んな」。
- */
-const rawText = computed(() => parts.value.kana + parts.value.pending)
 
 /** 提交给 judge() 的答案(末尾没打完的罗马字会补完) */
 const answerText = computed(() => finalize(raw.value, kanaScript.value))
@@ -158,13 +151,15 @@ function onPaste(e) {
 }
 
 /**
- * 触屏路径: 输入框是真实 <input>, 每次输入都从它的完整内容重算(幂等),
- * 所以退格、粘贴、光标跳转都能正确处理。
+ * 触屏路径: 输入框是真实 <input>, 每次输入都从它的完整内容重算(幂等)。
+ * 末尾「nn」在显示上被预览成了「ん」, 那个「ん」并不在 raw 里 ——
+ * 所以「接着往后打」的情况要用 mergeInputValue() 接回 raw, 否则
+ * nn 之后再打 i 接不上, 会变成「んい」而不是「んに」。
  */
 function applyRaw(el) {
-  const { kana, pending } = convert(el.value, kanaScript.value)
-  const text = kana + pending
-  raw.value = text
+  const view = fieldText.value // 上一次渲染进 <input> 的文本(带 nn → ん 预览)
+  raw.value = mergeInputValue(raw.value, el.value, view, kanaScript.value)
+  const text = fieldText.value
   if (el.value !== text) {
     el.value = text
     el.setSelectionRange?.(text.length, text.length)
@@ -365,7 +360,7 @@ const optionClass = (opt) => {
         <input
           v-else
           ref="inputEl"
-          :value="rawText"
+          :value="fieldText"
           class="answer-input jp"
           lang="ja"
           type="text"
