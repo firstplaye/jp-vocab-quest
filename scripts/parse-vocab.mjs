@@ -89,6 +89,7 @@ const EN2KATA = {
   sub: 'サブ',
   back: 'バック',
   menu: 'メニュー',
+  play: 'プレー', // 個人プレー（こじんplay）→ こじんプレー
 }
 
 /**
@@ -228,6 +229,9 @@ const PATCH_WORDS = [
   { lesson: 4, jp: 'マニュアル', set: { cn: '参考手册、说明书' } },
   { lesson: 6, jp: '添付', set: { kana: 'てんぷ', type: 'kanji' } },
   { lesson: 7, jp: 'テンポラリファイル', set: { cn: '临时文件' } },
+  // 原文档写成「定義（ていぎ）ファイル（definition file）」——纯英文的那个括注会被
+  // 跳过, 于是読音只剩「ていぎ」; 后半个词的读音补上
+  { lesson: 9, jp: '定義ファイル', set: { kana: 'ていぎファイル', type: 'kanji' } },
   { lesson: 31, jp: '関数', set: { kana: 'かんすう', type: 'kanji' } },
   { lesson: 31, jp: '定数', set: { kana: 'ていすう', type: 'kanji' } },
   { lesson: 31, jp: '変数', set: { kana: 'へんすう', type: 'kanji' } },
