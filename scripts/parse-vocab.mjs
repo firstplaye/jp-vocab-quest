@@ -279,6 +279,15 @@ for (const f of ADD_WORDS) {
   else l.words.unshift(f.word)
 }
 
+/**
+ * 6d. 第31课: 删除「英文：日语」条目
+ *   原文档补充词汇里混进了 Java、Spring boot 这类「英文→日语」对照
+ *   (Java：ジャバ / Springboot：スプリングブート …), 它们不是日语词汇, 全部剔除;
+ *   只保留释义含汉字的「中文→日语」条目(放在 6c 补丁之后, 免得误删补全前的空释义)。
+ */
+const l31 = result.find((x) => x.id === 31)
+if (l31) l31.words = l31.words.filter((w) => KANJI.test(w.cn))
+
 /** 7. 全部词条解析完后再体检(此时折行续接已完成) */
 for (const l of result) {
   for (const w of l.words) {
